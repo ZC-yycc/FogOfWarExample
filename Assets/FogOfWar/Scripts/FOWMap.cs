@@ -182,6 +182,7 @@ public class FOWMap
     {
         Graphics.Blit(curr_texture_, render_buffer_ping_);
         blur_mat_.SetTexture("_LastTex", render_buffer_ping_);
+        blur_mat_.SetFloat("_LerpRate", manager_.fog_lerp_rate_);
         Graphics.Blit(next_texture_, curr_texture_, blur_mat_, 1);
     }
 

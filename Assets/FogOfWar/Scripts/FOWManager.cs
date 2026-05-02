@@ -54,6 +54,8 @@ public class FOWManager : MonoBehaviour
     public byte                             visible_alpha_ = 0;
     /// <summary> 已探索区域透明度 </summary>
     public byte                             explored_alpha_ = 128;
+    /// <summary> 迷雾lerp速度 </summary>
+    public float                            fog_lerp_rate_ = 0.8f;
 
 
     private List<FOWViewer>                 viewer_list_ = new List<FOWViewer>();

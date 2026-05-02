@@ -61,6 +61,8 @@ MeshRenderer:
   m_RayTracingAccelStructBuildFlagsOverride: 0
   m_RayTracingAccelStructBuildFlags: 1
   m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -82,9 +84,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!1 &6632496654107412142
 GameObject:
@@ -166,20 +170,21 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   FOG_SIZE: {x: 200, y: 200}
   MAP_TILE_SIZE: 1
-  viewer_list_: []
-  fog_shader_: {fileID: 4800000, guid: 1ffdca7efc0743d49bf275a7526fb8b5, type: 3}
+  update_time_: 0.02
   is_save_explored_: 0
-  explored_alpha_: 200
-  visible_alpha_: 0
-  invisible_alpha_: 255
+  awake_generate_: 1
+  block_layer_:
+    serializedVersion: 2
+    m_Bits: 16
+  fog_shader_: {fileID: 4800000, guid: 1ffdca7efc0743d49bf275a7526fb8b5, type: 3}
   fog_color_:
     serializedVersion: 2
     rgba: 0
-  block_layer_:
-    serializedVersion: 2
-    m_Bits: 0
-  update_time_: 0.05
-  awake_generate_: 1
+  invisible_alpha_: 255
+  visible_alpha_: 0
+  explored_alpha_: 200
+  fog_lerp_rate_: 0.2
+  generated_fow_: 0
 --- !u!114 &2237329741007724064
 MonoBehaviour:
   m_ObjectHideFlags: 0

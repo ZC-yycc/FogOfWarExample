@@ -1024,28 +1024,12 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8233174148811182679, guid: b145b81b0e9d7064f816a8ddfbaacd9b, type: 3}
-      propertyPath: update_time_
-      value: 0.05
-      objectReference: {fileID: 0}
-    - target: {fileID: 8233174148811182679, guid: b145b81b0e9d7064f816a8ddfbaacd9b, type: 3}
       propertyPath: MAP_TILE_SIZE
-      value: 0.5
-      objectReference: {fileID: 0}
-    - target: {fileID: 8233174148811182679, guid: b145b81b0e9d7064f816a8ddfbaacd9b, type: 3}
-      propertyPath: explored_alpha_
-      value: 200
-      objectReference: {fileID: 0}
-    - target: {fileID: 8233174148811182679, guid: b145b81b0e9d7064f816a8ddfbaacd9b, type: 3}
-      propertyPath: block_layer_.m_Bits
-      value: 16
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8480132171309549707, guid: b145b81b0e9d7064f816a8ddfbaacd9b, type: 3}
       propertyPath: m_Name
       value: FOWManager
-      objectReference: {fileID: 0}
-    - target: {fileID: 8480132171309549707, guid: b145b81b0e9d7064f816a8ddfbaacd9b, type: 3}
-      propertyPath: m_IsActive
-      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
