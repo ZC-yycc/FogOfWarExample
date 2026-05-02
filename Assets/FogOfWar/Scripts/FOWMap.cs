@@ -20,60 +20,35 @@ public class FOWMap
     public int[,] BlockData => block_data_;
 #endif
 
-    /// <summary>
-    /// 网格相对于单个网格的尺寸，宽由有多少单个网格组成
-    /// </summary>
     private int                                                 rect_w_;
-
-    /// <summary>
-    /// 网格相对于单个网格的尺寸，高由有多少单个网格组成
-    /// </summary>
     private int                                                 rect_h_;
+    private int                                                 total_tiles_;
 
-    /// <summary>
-    /// 迷雾网格的颜色标志区，visible 表示可视区域，explored 表示该区域已探索。
-    /// </summary>
-    public FOWFlag[]                                            fog_flags_;
+    /// <summary> 可见性标志（0=不可见, 1=可见） </summary>
+    public byte[]                                               visible_flags_;
 
-    /// <summary>
-    /// 高斯模糊颜色缓冲区数组
-    /// </summary>
+    /// <summary> 已探索标志（0=未探索, 1=已探索） </summary>
+    public byte[]                                               explored_flags_;
+
+    /// <summary> 高斯模糊颜色缓冲区数组 </summary>
     public Color32[]                                            color_buffer_;
 
     private Material                                            blur_mat_;
-
-    /// <summary>
-    /// 保存颜色缓冲区的贴图
-    /// </summary>
     private Texture2D                                           texture_cache_;
-
-    /// <summary>
-    /// 高斯模糊的缓冲渲染贴图
-    /// </summary>
     private RenderTexture                                       render_buffer_ping_;
     private RenderTexture                                       render_buffer_pong_;
-
-    /// <summary>
-    /// 完成模糊后拿到模糊贴图缓存，由该变量缓存贴图渲染
-    /// </summary>
     private RenderTexture                                       next_texture_;
-
-    /// <summary>
-    /// 当前的渲染贴图
-    /// </summary>
     private RenderTexture                                       curr_texture_;
 
     private FOWManager                                          manager_;
-
     private float[]                                             tan_threshold_cache_;
 
-
-    /// <summary>
-    /// 迷雾贴图对外接口
-    /// </summary>
     public Texture CurrentTexture => curr_texture_;
 
-
+    private byte invisible_alpha_;
+    private byte visible_alpha_;
+    private byte explored_alpha_;
+    private Color32 fog_color_;
 
 
     /// <summary>
@@ -84,27 +59,35 @@ public class FOWMap
         manager_ = manager;
         rect_w_ = manager_.GRID_RECT.x;
         rect_h_ = manager_.GRID_RECT.y;
+        total_tiles_ = rect_w_ * rect_h_;
+
+        // 缓存常用值，减少间接访问
+        invisible_alpha_ = manager_.invisible_alpha_;
+        visible_alpha_ = manager_.visible_alpha_;
+        explored_alpha_ = manager_.explored_alpha_;
+        fog_color_ = new Color32(manager_.fog_color_.r, manager_.fog_color_.g, manager_.fog_color_.b, 255);
+
         InitBuffer();
         InitGrid();
         InitTanCache(2500);
     }
+
     private void InitBuffer()
     {
-        fog_flags_ = new FOWFlag[rect_w_ * rect_h_];
-        color_buffer_ = new Color32[rect_w_ * rect_h_];
+        visible_flags_ = new byte[total_tiles_];
+        explored_flags_ = new byte[total_tiles_];
+        color_buffer_ = new Color32[total_tiles_];
 
         // 初始化全图为黑色（不可见）
-        for (int i = 0; i < fog_flags_.Length; i++)
+        for (int i = 0; i < total_tiles_; i++)
         {
-            fog_flags_[i] = new FOWFlag();
-            color_buffer_[i] = new Color32(manager_.fog_color_.r, manager_.fog_color_.g, manager_.fog_color_.b, manager_.invisible_alpha_);
+            color_buffer_[i] = new Color32(fog_color_.r, fog_color_.g, fog_color_.b, invisible_alpha_);
         }
 
         blur_mat_ = new Material(manager_.fog_shader_);
         texture_cache_ = new Texture2D(rect_w_, rect_h_, TextureFormat.ARGB32, false);
         texture_cache_.wrapMode = TextureWrapMode.Clamp;
 
-        // 初始化纹理为全黑
         texture_cache_.SetPixels32(color_buffer_);
         texture_cache_.Apply();
 
@@ -113,15 +96,15 @@ public class FOWMap
         next_texture_ = RenderTexture.GetTemporary((int)(rect_w_ * 1.5f), (int)(rect_h_ * 1.5f), 0);
         curr_texture_ = RenderTexture.GetTemporary((int)(rect_w_ * 1.5f), (int)(rect_h_ * 1.5f), 0);
     }
+
     private void InitGrid()
     {
-        grid_data_arr_ = new FOWTile[rect_w_ * rect_h_];
+        grid_data_arr_ = new FOWTile[total_tiles_];
 
 #if UNITY_EDITOR
         block_data_ = new int[rect_w_, rect_h_];
 #endif
 
-        // 预分配一个容量为1的碰撞器数组，因为我们只关心指定位置有无碰撞体
         Collider[] hit_results = new Collider[1];
         int index = 0;
         for (int j = 0; j < rect_h_; j++)
@@ -130,7 +113,6 @@ public class FOWMap
             {
                 Vector3 check_pos = manager_.GridPos2ScenePos(new Vector2Int(i, j));
 
-                // 使用 OverlapBoxNonAlloc，不会分配新数组
                 int hit_count = Physics.OverlapBoxNonAlloc(
                     check_pos,
                     manager_.HALF_EXTENTS,
@@ -139,7 +121,6 @@ public class FOWMap
                     manager_.block_layer_
                 );
 
-                // 如果检测到至少一个碰撞器，则记为1，否则为0
                 int type = hit_count > 0 ? 1 : 0;
                 grid_data_arr_[index] = new FOWTile(type, i, j);
 #if UNITY_EDITOR
@@ -149,6 +130,7 @@ public class FOWMap
             }
         }
     }
+
     private void InitTanCache(int max_distance)
     {
         tan_threshold_cache_ = new float[max_distance + 1];
@@ -161,11 +143,7 @@ public class FOWMap
     }
 
 
-
-
-    /// <summary>
-    /// 释放缓存资源
-    /// </summary>
+    /// <summary> 释放缓存资源 </summary>
     public void Release()
     {
         RenderTexture.ReleaseTemporary(render_buffer_ping_);
@@ -173,86 +151,69 @@ public class FOWMap
         RenderTexture.ReleaseTemporary(next_texture_);
         RenderTexture.ReleaseTemporary(curr_texture_);
     }
+
     public FOWTile GetTile(int x, int y)
     {
         return (x >= 0 && y >= 0 && x < rect_w_ && y < rect_h_) ?
             grid_data_arr_[x + y * rect_w_] : null;
     }
-    /// <summary>
-    /// 判断指定网格坐标是否可见
-    /// </summary>
-    /// <param name="x"></param>
-    /// <param name="y"></param>
-    /// <returns></returns>
+
+    /// <summary> 判断指定网格坐标是否可见 </summary>
     public bool CanDisplay(int x, int y)
     {
         int index = Index(x, y);
-        return index != -1 && fog_flags_[index].visible;
+        return index != -1 && visible_flags_[index] != 0;
     }
-    /// <summary>
-    /// 将网格坐标转换为数组索引
-    /// </summary>
-    /// <param name="x"></param>
-    /// <param name="y"></param>
-    /// <returns></returns>
+
+    /// <summary> 将网格坐标转换为数组索引 </summary>
     public int Index(int x, int y)
     {
         return (x >= 0 && y >= 0 && x < rect_w_ && y < rect_h_) ?
            x + y * rect_w_ : -1;
     }
+
     public bool IsInMap(int x, int y)
     {
         return Index(x, y) != -1;
     }
-    /// <summary>
-    /// 对计算出的迷雾贴图进行lerp缓动处理
-    /// </summary>
+
+    /// <summary> 对计算出的迷雾贴图进行lerp缓动处理 </summary>
     public void Lerp()
     {
         Graphics.Blit(curr_texture_, render_buffer_ping_);
         blur_mat_.SetTexture("_LastTex", render_buffer_ping_);
         Graphics.Blit(next_texture_, curr_texture_, blur_mat_, 1);
     }
-    /// <summary>
-    /// 应用迷雾信息到指定区域
-    /// </summary>
+
+    /// <summary> 应用迷雾颜色到指定区域 </summary>
     public void ApplyFOW(int x, int y, int radius)
     {
-        if (radius < 0)
-        {
-            radius = 0;
-        }
+        if (radius < 0) radius = 0;
 
-        // 计算需要更新的区域边界
         int min_x = Mathf.Max(0, x - radius);
         int max_x = Mathf.Min(rect_w_ - 1, x + radius);
         int min_y = Mathf.Max(0, y - radius);
         int max_y = Mathf.Min(rect_h_ - 1, y + radius);
 
-        // 只更新指定范围内的格子
         for (int i = min_y; i <= max_y; ++i)
         {
             for (int j = min_x; j <= max_x; ++j)
             {
                 int index = Index(j, i);
-                ref var flag = ref fog_flags_[index];
 
-                // 该区域不可见，则设置透明度为不可见
-                color_buffer_[index].a = flag.visible ?
-                    manager_.visible_alpha_ : (flag.explored ? manager_.explored_alpha_ : manager_.invisible_alpha_);
+                color_buffer_[index].a = visible_flags_[index] != 0
+                    ? visible_alpha_
+                    : (explored_flags_[index] != 0 ? explored_alpha_ : invisible_alpha_);
             }
         }
     }
-    /// <summary>
-    /// 模糊处理
-    /// </summary>
+
+    /// <summary> 模糊处理 </summary>
     public void Blur()
     {
-        // 应用部分更新到纹理
         texture_cache_.SetPixels32(0, 0, rect_w_, rect_h_, color_buffer_);
         texture_cache_.Apply();
 
-        // 模糊处理
         Graphics.Blit(texture_cache_, render_buffer_ping_, blur_mat_, 0);
         for (int i = 0; i < 2; ++i)
         {
@@ -261,37 +222,26 @@ public class FOWMap
         }
         Graphics.Blit(render_buffer_ping_, next_texture_);
     }
-    /// <summary>
-    /// 重置所有迷雾可见性标记为false（在每帧所有计算之前调用）
-    /// </summary>
+
+    /// <summary> 重置所有可见性为0（memset级性能） </summary>
     public void ResetAllVisible()
     {
-        for (int i = 0; i < fog_flags_.Length; ++i)
-        {
-            fog_flags_[i].visible = false;
-        }
+        Array.Clear(visible_flags_, 0, total_tiles_);
     }
-    /// <summary>
-    /// 将所有当前可见的格子标记为已探索（在所有观察者ComputeFlags完成后调用一次）
-    /// </summary>
+
+    /// <summary> 将当前可见的格子标记为已探索（OR写入） </summary>
     public void MarkExplored()
     {
-        for (int i = 0; i < fog_flags_.Length; ++i)
+        for (int i = 0; i < total_tiles_; ++i)
         {
-            if (fog_flags_[i].visible)
-            {
-                fog_flags_[i].explored = true;
-            }
+            explored_flags_[i] |= visible_flags_[i];
         }
     }
+
     /// <summary>
-    /// 计算单个观察者的迷雾网格可见性，直接将可见结果OR写入fog_flags_
-    /// 核心原则：只写true，永不写false——后处理的观察者不能覆盖前者的可见区域
+    /// 计算单个观察者的迷雾网格可见性，直接将可见结果OR写入visible_flags_
+    /// 核心原则：只写1，永不写0——后处理的观察者不能覆盖前者的可见区域
     /// </summary>
-    /// <param name="viewer_index">观察者索引</param>
-    /// <param name="x">视野起始坐标X</param>
-    /// <param name="y">视野起始坐标Y</param>
-    /// <param name="range">视野范围</param>
     public void ComputeFlags(int viewer_index, int x, int y, float range)
     {
         if (range < 0) range = 0;
@@ -305,11 +255,13 @@ public class FOWMap
             cache.RangeCache = range;
         }
 
-        // ============ 第一步：收集范围内所有网格 ============
+        // 第一步：收集范围内所有网格
         FOWTile[] area_tile_buffer = cache.GetAreaTileBuffer();
         int tile_count = 0;
 
+#if UNITY_EDITOR
         Profiler.BeginSample("FogUpdate.ComputeFlags.FlagGrid");
+#endif
         for (int i = -irange; i <= irange; ++i)
         {
             for (int j = -irange; j <= irange; ++j)
@@ -324,16 +276,22 @@ public class FOWMap
                 area_tile_buffer[tile_count++] = grid_data_arr_[grid_index];
             }
         }
+#if UNITY_EDITOR
         Profiler.EndSample();
+#endif
 
         if (tile_count == 0) return;
 
-        // ============ 第二步：按距离排序 ============
+        // 第二步：按距离排序
+#if UNITY_EDITOR
         Profiler.BeginSample("FogUpdate.ComputeFlags.Sort");
+#endif
         Array.Sort(area_tile_buffer, 0, tile_count, Comparer<FOWTile>.Create((a, b) => a.Distance(x, y) - b.Distance(x, y)));
+#if UNITY_EDITOR
         Profiler.EndSample();
+#endif
 
-        // ============ 第三步：收集障碍物并预计算索引 ============
+        // 第三步：收集障碍物并预计算索引
         FOWTile[] obs_tile_buffer = cache.GetObstacleTileBuffer();
         int[] obs_start_indices = cache.GetObstacleIndicesBuffer();
         int obs_count = 0;
@@ -342,40 +300,43 @@ public class FOWMap
         {
             FOWTile tile = area_tile_buffer[i];
             if (tile.type_ != 1) continue;
-            if (tile.x_ == x && tile.y_ == y) continue; // 自身位置跳过
+            if (tile.x_ == x && tile.y_ == y) continue;
 
             obs_tile_buffer[obs_count] = tile;
             obs_start_indices[obs_count] = i;
             obs_count++;
         }
 
-        // ============ 第四步：障碍物遮挡剔除（只标记null，不写fog_flags_） ============
+        // 第四步：障碍物遮挡剔除（只置null，不写visible_flags_）
+#if UNITY_EDITOR
         Profiler.BeginSample("FogUpdate.ComputeFlags.Cast");
+#endif
         for (int i = 0; i < obs_count; ++i)
         {
             Cast(obs_tile_buffer[i], x, y, area_tile_buffer, obs_start_indices[i]);
         }
+#if UNITY_EDITOR
         Profiler.EndSample();
+#endif
 
-        // ============ 第五步：将本观察者的可见结果OR写入fog_flags_（只写true） ============
+        // 第五步：将本观察者的可见结果OR写入visible_flags_（只写1）
         for (int i = 0; i < tile_count; ++i)
         {
             FOWTile tile = area_tile_buffer[i];
-            if (tile == null) continue; // 被遮挡的已置空
+            if (tile == null) continue;
 
             int idx = Index(tile.x_, tile.y_);
             if (idx >= 0)
             {
-                fog_flags_[idx].visible = true;
+                visible_flags_[idx] = 1;
             }
         }
     }
 
 
-
     /// <summary>
-    /// 障碍物对列表中的网格进行是否遮挡判断，遮挡的格子置null
-    /// 不写fog_flags_——由ComputeFlags统一OR写入
+    /// 障碍物遮挡判断，被遮挡的格子置null
+    /// 不碰visible_flags_——由ComputeFlags统一OR写入
     /// </summary>
     private void Cast(FOWTile ob, int x, int y, FOWTile[] test_list, int start_index)
     {
@@ -420,26 +381,17 @@ public class FOWMap
     }
 }
 
-/// <summary>
-/// 战争迷雾数据缓存类，用于标记网格是否可见、是否已探索
-/// </summary>
-public struct FOWFlag
-{
-    public bool visible;
-    public bool explored;
-}
 
 /// <summary>
 /// 战争迷雾网格信息类
 /// </summary>
 public class FOWTile
 {
-    /// <summary>
-    /// 1表示障碍物 0表示非障碍物
-    /// </summary>
+    /// <summary> 1=障碍物, 0=非障碍物 </summary>
     public int type_;
     public int x_;
     public int y_;
+
     public FOWTile(int type, int x, int y)
     {
         type_ = type;
@@ -454,6 +406,7 @@ public class FOWTile
         return tx * tx + ty * ty;
     }
 }
+
 
 /// <summary>
 /// 观察者的数据缓存类，缓存观察者周围网格信息、观察者感知范围缓存
@@ -477,16 +430,6 @@ public struct ViewerCache
             int a = (int)(range_cache - 0.7f * range_cache);
             buffer_unification_size = S - a * a * 8;
         }
-    }
-
-    public readonly void ResetBuffers()
-    {
-        if (area_tile_buffer != null)
-            Array.Clear(area_tile_buffer, 0, area_tile_buffer.Length);
-        if (obstacle_tile_buffer != null)
-            Array.Clear(obstacle_tile_buffer, 0, obstacle_tile_buffer.Length);
-        if (obstacle_indices_buffer != null)
-            Array.Clear(obstacle_indices_buffer, 0, obstacle_indices_buffer.Length);
     }
 
     public FOWTile[] GetAreaTileBuffer()
@@ -524,6 +467,7 @@ public struct ViewerCache
         return obstacle_indices_buffer;
     }
 }
+
 
 /// <summary>
 /// 观察者缓存管理（静态类，仅管理ViewerCache数组）

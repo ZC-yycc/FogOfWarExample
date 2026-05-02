@@ -35,11 +35,11 @@ public class FOWManager : MonoBehaviour
     /// <summary> 迷雾地图 </summary>
     public FOWMap                           map_;
     /// <summary> 网格左上角到中心的距离 </summary>
-    public float HALF_LENGTH_X => (int)((float)FOG_SIZE.x / MAP_TILE_SIZE) / 2f * MAP_TILE_SIZE;
+    public float                            HALF_LENGTH_X => (int)(FOG_SIZE.x / MAP_TILE_SIZE) / 2f * MAP_TILE_SIZE;
     /// <summary> 网格左上角到中心的距离 </summary>
-    public float HALF_LENGTH_Y => (int)((float)FOG_SIZE.y / MAP_TILE_SIZE) / 2f * MAP_TILE_SIZE;
+    public float                            HALF_LENGTH_Y => (int)(FOG_SIZE.y / MAP_TILE_SIZE) / 2f * MAP_TILE_SIZE;
     /// <summary> 碰撞检测的半径 </summary>
-    public Vector3 HALF_EXTENTS => new Vector3(MAP_TILE_SIZE / 2f, 0.01f, MAP_TILE_SIZE / 2f);
+    public Vector3                          HALF_EXTENTS => new Vector3(MAP_TILE_SIZE / 2f, 0.01f, MAP_TILE_SIZE / 2f);
     /// <summary> 障碍物层级 </summary>
     public LayerMask                        block_layer_ = -1;
 
@@ -58,7 +58,7 @@ public class FOWManager : MonoBehaviour
 
     private List<FOWViewer>                 viewer_list_ = new List<FOWViewer>();
     private Vector2Int[]                    viewer_grid_pos_cache_;
-    public bool                            generated_fow_ = false;
+    public bool                             generated_fow_ = false;
 
 
     private void Awake()
@@ -137,12 +137,18 @@ public class FOWManager : MonoBehaviour
             viewer_grid_pos_cache_[i] = ScenePos2GridPos(viewer_list_[i].transform.position);
 
         // 步骤1：清零所有可见性标记
+#if UNITY_EDITOR
         Profiler.BeginSample("FogUpdate.Reset");
+#endif
         map_.ResetAllVisible();
+#if UNITY_EDITOR
         Profiler.EndSample();
+#endif
 
-        // 步骤2：每个观察者独立计算可见性，直接OR写入fog_flags_（只写true，绝不覆盖）
+        // 步骤2：每个观察者独立计算可见性，直接OR写入visible_flags_（只写1，绝不覆盖）
+#if UNITY_EDITOR
         Profiler.BeginSample("FogUpdate.ComputeFlags");
+#endif
         for (int i = 0; i < viewer_count; ++i)
         {
             map_.ComputeFlags(
@@ -152,26 +158,38 @@ public class FOWManager : MonoBehaviour
                 viewer_list_[i].ViewerRange / MAP_TILE_SIZE
             );
         }
+#if UNITY_EDITOR
         Profiler.EndSample();
+#endif
 
         // 步骤3：标记已探索（一次遍历O(n)，仅在需要时执行）
         if (is_save_explored_)
         {
+#if UNITY_EDITOR
             Profiler.BeginSample("FogUpdate.MarkExplored");
+#endif
             map_.MarkExplored();
+#if UNITY_EDITOR
             Profiler.EndSample();
+#endif
         }
 
         // 步骤4：应用颜色 + 模糊
+#if UNITY_EDITOR
         Profiler.BeginSample("FogUpdate.ApplyFOW");
+#endif
         for (int i = 0; i < viewer_count; ++i)
             map_.ApplyFOW(viewer_grid_pos_cache_[i].x, viewer_grid_pos_cache_[i].y,
                 (int)(viewer_list_[i].ViewerRange / MAP_TILE_SIZE) + 20);
         map_.Blur();
+#if UNITY_EDITOR
         Profiler.EndSample();
+#endif
 
         // 步骤5：更新Culling组件
+#if UNITY_EDITOR
         Profiler.BeginSample("FogUpdate.Culling");
+#endif
         for (int i = 0; i < viewer_count; ++i)
         {
             List<FOWCulling> list = viewer_list_[i].CullingCompList;
@@ -183,7 +201,9 @@ public class FOWManager : MonoBehaviour
                 comp.SetRenderEnabled(map_.CanDisplay(pos.x, pos.y));
             }
         }
+#if UNITY_EDITOR
         Profiler.EndSample();
+#endif
     }
 
 
