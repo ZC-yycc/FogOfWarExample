@@ -61,7 +61,7 @@ public class FOWCulling : MonoBehaviour
         }
 
         // 根据FOW管理器状态和启动隐藏设置来决定渲染器启用状态
-        SetRenderEnabled(FOWManager.instance_ == null || !awake_hide_ && FOWManager.instance_.GeneratedFow);
+        SetRenderEnabled(FOWManager.instance_ == null || !awake_hide_ && FOWManager.instance_.generated_fow_);
     }
     /// <summary>
     /// 设置渲染器的启用状态

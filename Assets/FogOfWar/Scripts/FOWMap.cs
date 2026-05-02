@@ -1,7 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Profiling;
-using UnityEngine.SocialPlatforms;
 
 
 /// <summary>
@@ -31,7 +31,7 @@ public class FOWMap
     private int                                                 rect_h_;
 
     /// <summary>
-    /// 迷雾网格的颜色标志区，r == 255 时表示可视区域， b == 255 时表示该区域已探索。
+    /// 迷雾网格的颜色标志区，visible 表示可视区域，explored 表示该区域已探索。
     /// </summary>
     public FOWFlag[]                                            fog_flags_;
 
@@ -128,7 +128,7 @@ public class FOWMap
         {
             for (int i = 0; i < rect_w_; i++)
             {
-                Vector3 check_pos = manager_.GridPos2ScenePos(new int[] { i, j });
+                Vector3 check_pos = manager_.GridPos2ScenePos(new Vector2Int(i, j));
 
                 // 使用 OverlapBoxNonAlloc，不会分配新数组
                 int hit_count = Physics.OverlapBoxNonAlloc(
@@ -262,137 +262,127 @@ public class FOWMap
         Graphics.Blit(render_buffer_ping_, next_texture_);
     }
     /// <summary>
-    /// 计算迷雾网格可见性
+    /// 重置所有迷雾可见性标记为false（在每帧所有计算之前调用）
     /// </summary>
+    public void ResetAllVisible()
+    {
+        for (int i = 0; i < fog_flags_.Length; ++i)
+        {
+            fog_flags_[i].visible = false;
+        }
+    }
+    /// <summary>
+    /// 将所有当前可见的格子标记为已探索（在所有观察者ComputeFlags完成后调用一次）
+    /// </summary>
+    public void MarkExplored()
+    {
+        for (int i = 0; i < fog_flags_.Length; ++i)
+        {
+            if (fog_flags_[i].visible)
+            {
+                fog_flags_[i].explored = true;
+            }
+        }
+    }
+    /// <summary>
+    /// 计算单个观察者的迷雾网格可见性，直接将可见结果OR写入fog_flags_
+    /// 核心原则：只写true，永不写false——后处理的观察者不能覆盖前者的可见区域
+    /// </summary>
+    /// <param name="viewer_index">观察者索引</param>
     /// <param name="x">视野起始坐标X</param>
     /// <param name="y">视野起始坐标Y</param>
     /// <param name="range">视野范围</param>
     public void ComputeFlags(int viewer_index, int x, int y, float range)
     {
-        if (range < 0)
-        {
-            range = 0;
-        }
+        if (range < 0) range = 0;
+
+        int irange = (int)range;
+        int area = irange * irange;
 
         ref ViewerCache cache = ref FOWDataCache.GetCache(viewer_index);
-
-        // 更新计算范围
         if (range != cache.RangeCache)
         {
-            // 范围缓存存储
             cache.RangeCache = range;
         }
 
-        /// <summary>
-        /// 获取玩家周围一定数量格子，并且标记为可见 ===================================================================
-        /// </summary>
-
-        // 拿到区域的对应缓冲区
+        // ============ 第一步：收集范围内所有网格 ============
         FOWTile[] area_tile_buffer = cache.GetAreaTileBuffer();
-
-        // 用于距离判断
-        int area = (int)(range * range);
-        int index = 0;
+        int tile_count = 0;
 
         Profiler.BeginSample("FogUpdate.ComputeFlags.FlagGrid");
-        // 从 -r 到 r 判断是否在范围内
-        for (int i = (int)-range; i <= range; ++i)
+        for (int i = -irange; i <= irange; ++i)
         {
-            for (int j = (int)-range; j <= range; ++j)
+            for (int j = -irange; j <= irange; ++j)
             {
-                if (i * i + j * j > area)   // 不在范围内则跳过
-                    continue;
+                if (i * i + j * j > area) continue;
 
-                int grid_index = Index(x + i, y + j);                   // 得到该位置的网格索引
-                area_tile_buffer[index] = grid_data_arr_[grid_index];   // 缓存网格
-                fog_flags_[grid_index].visible = true;                  // 标记为已发现
-                index++;                                                // 索引++
+                int grid_x = x + i;
+                int grid_y = y + j;
+                int grid_index = Index(grid_x, grid_y);
+                if (grid_index < 0) continue;
+
+                area_tile_buffer[tile_count++] = grid_data_arr_[grid_index];
             }
         }
         Profiler.EndSample();
 
+        if (tile_count == 0) return;
 
+        // ============ 第二步：按距离排序 ============
         Profiler.BeginSample("FogUpdate.ComputeFlags.Sort");
-        /// <summary>
-        /// 对得到的所有网格按照距离排序，方便后续检测阻挡网格 ========================================================
-        /// </summary>
-        Array.Sort(area_tile_buffer, (a, b) =>
-        {
-            if (a == null && b == null) return 0;
-            if (a == null) return 1;
-            if (b == null) return -1;
-            return a.Distance(x, y) - b.Distance(x, y);
-        });
+        Array.Sort(area_tile_buffer, 0, tile_count, Comparer<FOWTile>.Create((a, b) => a.Distance(x, y) - b.Distance(x, y)));
         Profiler.EndSample();
 
-
-
-
-        /// <summary>
-        /// 缓存所有障碍物 ============================================================================================
-        /// </summary>
+        // ============ 第三步：收集障碍物并预计算索引 ============
         FOWTile[] obs_tile_buffer = cache.GetObstacleTileBuffer();
+        int[] obs_start_indices = cache.GetObstacleIndicesBuffer();
+        int obs_count = 0;
 
-        index = 0;
-        for (int i = (int)-range; i <= range; ++i)
+        for (int i = 0; i < tile_count; ++i)
         {
-            for (int j = (int)-range; j <= range; ++j)
-            {
-                if (i == 0 && i == j)       // 自身位置跳过
-                    continue;
+            FOWTile tile = area_tile_buffer[i];
+            if (tile.type_ != 1) continue;
+            if (tile.x_ == x && tile.y_ == y) continue; // 自身位置跳过
 
-                if (i * i + j * j > area)   // 区域外跳过
-                    continue;
-
-                var tile = GetTile(x + i, y + j);
-                if (tile == null)           // 为 null 跳过
-                    continue;
-
-                if (tile.type_ != 1)         // 不是障碍物跳过
-                    continue;
-
-                obs_tile_buffer[index] = tile;
-                index++;
-            }
+            obs_tile_buffer[obs_count] = tile;
+            obs_start_indices[obs_count] = i;
+            obs_count++;
         }
 
-
-
+        // ============ 第四步：障碍物遮挡剔除（只标记null，不写fog_flags_） ============
         Profiler.BeginSample("FogUpdate.ComputeFlags.Cast");
-        /// <summary>
-        /// 遍历所有网格障碍物，对所有网格进行检测，标记所有不可视网格 ====================================================
-        /// </summary>
-        for (int i = 0; i < obs_tile_buffer.Length; ++i)
+        for (int i = 0; i < obs_count; ++i)
         {
-            FOWTile ob = obs_tile_buffer[i];
-            if (ob == null)
-            {
-                continue;
-            }
-
-            Cast(ob, x, y, area_tile_buffer);
+            Cast(obs_tile_buffer[i], x, y, area_tile_buffer, obs_start_indices[i]);
         }
         Profiler.EndSample();
+
+        // ============ 第五步：将本观察者的可见结果OR写入fog_flags_（只写true） ============
+        for (int i = 0; i < tile_count; ++i)
+        {
+            FOWTile tile = area_tile_buffer[i];
+            if (tile == null) continue; // 被遮挡的已置空
+
+            int idx = Index(tile.x_, tile.y_);
+            if (idx >= 0)
+            {
+                fog_flags_[idx].visible = true;
+            }
+        }
     }
 
 
 
     /// <summary>
-    /// 障碍物对列表中的网格进行是否遮挡判断，并标记
+    /// 障碍物对列表中的网格进行是否遮挡判断，遮挡的格子置null
+    /// 不写fog_flags_——由ComputeFlags统一OR写入
     /// </summary>
-    /// <param name="ob">障碍物</param>
-    /// <param name="x">观察者网格坐标 x </param>
-    /// <param name="y">观察者网格坐标 y </param>
-    /// <param name="test_list">待检测列表</param>
-    /// <returns></returns>
-    public void Cast(FOWTile ob, int x, int y, FOWTile[] test_list)
+    private void Cast(FOWTile ob, int x, int y, FOWTile[] test_list, int start_index)
     {
         int ob_x = ob.x_ - x;
         int ob_y = ob.y_ - y;
         int ob_dist_sqrt = ob_x * ob_x + ob_y * ob_y;
         float tan_z = tan_threshold_cache_[ob_dist_sqrt];
-        int start_index = Array.IndexOf(test_list, ob);
-
 
         for (int i = start_index + 1; i < test_list.Length; ++i)
         {
@@ -403,73 +393,28 @@ public class FOWMap
             int dy = tile.y_ - y;
 
             long dot = (long)ob_x * dx + (long)ob_y * dy;
-            if (dot <= 0)
-            {
-                continue;  // 目标不在障碍物前方
-            }
+            if (dot <= 0) continue;
 
-            // 快速拒绝
+            // 障碍物直接遮挡
             if (tile.type_ == 1)
             {
-                fog_flags_[Index(tile.x_, tile.y_)].visible = false;
+                test_list[i] = null;
                 continue;
             }
 
-            if (dx * dx + dy * dy <= ob_dist_sqrt)
-            {
-                continue;
-            }
+            if (dx * dx + dy * dy <= ob_dist_sqrt) continue;
 
-            int index = Index(tile.x_, tile.y_);
             long cross = (long)ob_x * dy - (long)ob_y * dx;
             if (cross == 0)
             {
-                fog_flags_[index].visible = false;
+                test_list[i] = null;
                 continue;
             }
 
-            if (dot > 0)
+            long cross_abs = cross >= 0 ? cross : -cross;
+            if (cross_abs < dot * tan_z)
             {
-                long cross_abs = cross >= 0 ? cross : -cross;
-                if (cross_abs < dot * tan_z)
-                    fog_flags_[index].visible = false;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 刷新迷雾，将玩家周围所有格子重置，根据是否保存进度标记通道
-    /// </summary>
-    public void FreshFog(int viewer_index, bool is_save_explored)
-    {
-        FOWTile[] area_tile_buffer = FOWDataCache.GetCache(viewer_index).GetAreaTileBuffer();
-        if (area_tile_buffer == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < area_tile_buffer.Length; ++i)
-        {
-            if (area_tile_buffer[i] == null)
-            {
-                continue;
-            }
-
-            int index = Index(area_tile_buffer[i].x_, area_tile_buffer[i].y_);
-
-            // 如果该位置不可见则跳过
-            if (!fog_flags_[index].visible)
-            {
-                continue;
-            }
-
-            // 将该位置设置为不可见
-            fog_flags_[index].visible = false;
-
-            // 标记为已探索
-            if (is_save_explored)
-            {
-                fog_flags_[index].explored = true;
+                test_list[i] = null;
             }
         }
     }
@@ -480,15 +425,8 @@ public class FOWMap
 /// </summary>
 public struct FOWFlag
 {
-    /// <summary>
-    /// 是否可见
-    /// </summary>
-    public bool                                             visible;
-
-    /// <summary>
-    /// 是否已探索
-    /// </summary>
-    public bool                                             explored;
+    public bool visible;
+    public bool explored;
 }
 
 /// <summary>
@@ -499,9 +437,9 @@ public class FOWTile
     /// <summary>
     /// 1表示障碍物 0表示非障碍物
     /// </summary>
-    public int                                              type_;
-    public int                                              x_;
-    public int                                              y_;
+    public int type_;
+    public int x_;
+    public int y_;
     public FOWTile(int type, int x, int y)
     {
         type_ = type;
@@ -522,57 +460,33 @@ public class FOWTile
 /// </summary>
 public struct ViewerCache
 {
-    /// <summary>
-    /// 观察者周围的网格缓存，半径 r 则缓存 （4 * r * r）- 边角网格数，个网格
-    /// 具体算法看 UpdateComputeRange 函数。
-    /// </summary>
-    private FOWTile[]                                       area_tile_buffer;
-
-    /// <summary>
-    /// 障碍物缓存与 area_tile_buffer_ 大小一致，都是使用 buffer_unification_s_ 初始化大小
-    /// </summary>
-    private FOWTile[]                                       obstacle_tile_buffer;
-
-    /// <summary>
-    /// 对应viewer的视野范围缓存
-    /// </summary>
-    private float                                           range_cache;
-
-    /// <summary>
-    /// 缓存的缓冲大小，即缓存的网格数
-    /// </summary>
-    private int                                             buffer_unification_size;
-
-
+    private FOWTile[] area_tile_buffer;
+    private FOWTile[] obstacle_tile_buffer;
+    private float range_cache;
+    private int buffer_unification_size;
+    private int[] obstacle_indices_buffer;
 
     public float RangeCache
     {
-        readonly get
-        {
-            return range_cache;
-        }
+        readonly get => range_cache;
         set
         {
             range_cache = value;
-            int side_length = (int)(2 * range_cache + 1);       // 计算正方形的边长
-            int S = side_length * side_length;                  // 计算正方形面积
-            int a = (int)(range_cache - 0.7f * range_cache);    // 计算边角多余的区域
-            buffer_unification_size = S - a * a * 8;            // 计算除去边缘面积（大概去除，不能完全去除）后的面积，同步缓存大小
+            int side_length = (int)(2 * range_cache + 1);
+            int S = side_length * side_length;
+            int a = (int)(range_cache - 0.7f * range_cache);
+            buffer_unification_size = S - a * a * 8;
         }
     }
 
-
-
-    /// <summary>
-    /// 重置缓存
-    /// </summary>
     public readonly void ResetBuffers()
     {
-        if (area_tile_buffer == null || obstacle_tile_buffer == null)
-            return;
-
-        Array.Clear(area_tile_buffer, 0, area_tile_buffer.Length);
-        Array.Clear(obstacle_tile_buffer, 0, obstacle_tile_buffer.Length);
+        if (area_tile_buffer != null)
+            Array.Clear(area_tile_buffer, 0, area_tile_buffer.Length);
+        if (obstacle_tile_buffer != null)
+            Array.Clear(obstacle_tile_buffer, 0, obstacle_tile_buffer.Length);
+        if (obstacle_indices_buffer != null)
+            Array.Clear(obstacle_indices_buffer, 0, obstacle_indices_buffer.Length);
     }
 
     public FOWTile[] GetAreaTileBuffer()
@@ -596,23 +510,34 @@ public struct ViewerCache
         }
         return obstacle_tile_buffer;
     }
+
+    public int[] GetObstacleIndicesBuffer()
+    {
+        if (obstacle_indices_buffer == null || obstacle_indices_buffer.Length != buffer_unification_size)
+        {
+            obstacle_indices_buffer = new int[buffer_unification_size];
+        }
+        else
+        {
+            Array.Clear(obstacle_indices_buffer, 0, obstacle_indices_buffer.Length);
+        }
+        return obstacle_indices_buffer;
+    }
 }
 
 /// <summary>
-/// 网格检测缓存，防止变量频繁创建，触发GC
+/// 观察者缓存管理（静态类，仅管理ViewerCache数组）
 /// </summary>
 public static class FOWDataCache
 {
-    private static ViewerCache[]                            viewer_cache_array_ = new ViewerCache[0];
+    private static ViewerCache[] viewer_cache_array_ = new ViewerCache[0];
 
     public static ref ViewerCache GetCache(int index)
     {
-        // 边界检查
         if (index >= viewer_cache_array_.Length)
         {
             Array.Resize(ref viewer_cache_array_, index + 1);
         }
-
         return ref viewer_cache_array_[index];
     }
 }
